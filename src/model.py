@@ -98,7 +98,7 @@ class ResNetTransformer(nn.Module):
 
         # Classification head
         self.norm = nn.LayerNorm(dim)
-        self.dropout = nn.Dropout(0.1)
+        self.dropout = nn.Dropout(0.3)
         self.classifier = nn.Linear(dim, num_classes)
 
     def forward(self, x):
