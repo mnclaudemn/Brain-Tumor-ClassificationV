@@ -1,43 +1,62 @@
-# Breast-Cancer-Classification
-Deep learning model for breast cancer classification using ResNet and vision encoder
+# Breast Cancer Classification using ResNet + Transformer
 
+## Overview
+This project implements a binary image classification model for breast cancer detection (benign vs malignant). The architecture combines a pretrained ResNet50 convolutional backbone with a Transformer encoder to capture both local and global image features.
 
-#  Breast Cancer Classification using Deep Learning
+---
 
-##  Overview
+## Problem Definition
+The objective is to classify histopathology images into two categories:
+- Benign
+- Malignant
 
-This project builds a deep learning model to classify breast cancer images (benign vs malignant) using a hybrid architecture combining ResNet and a vision encoder.
+This task is relevant for medical image analysis and early cancer detection research.
 
-##  Features
+---
 
-* ResNet-based feature extraction
-* Vision encoder for global representation
-* Binary classification (cancer detection)
+## Model Architecture
+The model consists of the following components:
 
-##  Tech Stack
+- ResNet50 backbone for feature extraction
+- Feature tokenization layer to convert CNN feature maps into sequences
+- Learnable positional encoding
+- Transformer encoder for global dependency modeling
+- Classification head using a fully connected layer
 
-* Python
-* PyTorch
-* NumPy, Pandas
-* Matplotlib
+---
 
-##  Project Structure
+## Key Design Choices
+- Transfer learning using pretrained ResNet50
+- Hybrid CNN-Transformer architecture
+- CLS token for sequence-level classification
+- Layer normalization before classification head
 
-```
-src/        # training and model code
-notebooks/  # experiments
-```
+---
 
-##  How to Run
+## Training Pipeline
+The training process includes:
 
-(Coming soon)
+- Optimizer: AdamW
+- Loss function: CrossEntropyLoss
+- Learning rate scheduler: CosineAnnealingLR
+- Mixed precision training (FP16 optional)
+- Gradient accumulation
+- Gradient clipping
+- Early stopping (optional)
+- Model checkpointing
 
-##  Future Improvements
+---
 
-* Add Grad-CAM visualization
-* Improve dataset handling
-* Deploy using Streamlit
+## Evaluation Metrics
+The model is evaluated using:
 
-##  Author
+- Accuracy
+- Precision
+- Recall
+- F1-score
+- ROC-AUC
+- Confusion matrix
 
-Your Name
+---
+
+## Project Structure
