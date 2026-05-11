@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
-
-
 # ----------------------------
 # 1. CNN Backbone (ResNet50)
 # ----------------------------
