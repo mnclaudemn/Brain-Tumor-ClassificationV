@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from dataclasses import dataclass
+
+
 # ===================== CONFIG =====================
 @dataclass
 class TrainingConfig:
@@ -16,14 +18,14 @@ class TrainingConfig:
 
 
 # ===================== METRIC =====================
-
 def accuracy(outputs, labels):
     preds = torch.argmax(outputs, dim=1)
-    return (preds == labels).float().mean()
+    correct = (preds == labels).sum().item()
+    total = labels.size(0)
+    return correct, total
 
 
 # ===================== CALLBACK BASE =====================
-
 class Callback:
     def on_train_begin(self, trainer): pass
     def on_train_end(self, trainer): pass
@@ -34,7 +36,6 @@ class Callback:
 
 
 # ===================== CALLBACKS =====================
-
 class EarlyStoppingCallback(Callback):
     def __init__(self, patience=3, mode="max", min_delta=0.0):
         self.patience = patience
@@ -74,14 +75,9 @@ class ModelCheckpointCallback(Callback):
     def on_validation_end(self, trainer, logs=None):
         metric = logs["val_acc"] if self.mode == "max" else logs["val_loss"]
 
-        if self.best is None:
-            self.best = metric
-            torch.save(trainer.model.state_dict(), self.path)
-            return
-
-        improved = metric > self.best if self.mode == "max" else metric < self.best
-
-        if improved:
+        if self.best is None or (
+            metric > self.best if self.mode == "max" else metric < self.best
+        ):
             self.best = metric
             torch.save(trainer.model.state_dict(), self.path)
 
@@ -98,13 +94,14 @@ class LoggingCallback(Callback):
 
 
 # ===================== TRAINER =====================
-
 class AdvancedTrainer:
     def __init__(self, model, train_loader, val_loader, config: TrainingConfig):
+
         self.cfg = config
 
         self.device = torch.device(
-            config.device if torch.cuda.is_available() else "cpu"
+            "cuda" if torch.cuda.is_available() and config.device == "cuda"
+            else "cpu"
         )
 
         self.model = model.to(self.device)
@@ -124,16 +121,9 @@ class AdvancedTrainer:
 
         self.criterion = nn.CrossEntropyLoss()
 
-        # AMP setup
+        # AMP setup (modern API)
         self.use_amp = config.mixed_precision in ["fp16", "bf16"]
-        self.autocast_dtype = (
-            torch.float16 if config.mixed_precision == "fp16"
-            else torch.bfloat16
-        )
-
-        self.scaler = torch.cuda.amp.GradScaler(
-            enabled=(config.mixed_precision == "fp16")
-        )
+        self.scaler = torch.amp.GradScaler("cuda", enabled=(config.mixed_precision == "fp16"))
 
         self.callbacks = []
         self.should_stop = False
@@ -151,16 +141,14 @@ class AdvancedTrainer:
         self.model.train()
 
         total_loss = 0.0
-        total_acc = 0.0
+        correct_count = 0
+        total_count = 0
 
         for step, (images, labels) in enumerate(self.train_loader):
             images = images.to(self.device)
             labels = labels.to(self.device)
 
-            with torch.cuda.amp.autocast(
-                enabled=self.use_amp,
-                dtype=self.autocast_dtype
-            ):
+            with torch.amp.autocast("cuda", enabled=self.use_amp):
                 outputs = self.model(images)
                 loss = self.criterion(outputs, labels)
                 loss = loss / self.cfg.grad_accum_steps
@@ -180,14 +168,17 @@ class AdvancedTrainer:
                 self.scaler.update()
                 self.optimizer.zero_grad(set_to_none=True)
 
-            total_loss += loss.item() * self.cfg.grad_accum_steps
-            total_acc += accuracy(outputs, labels).item()
+            total_loss += loss.item()
+
+            correct, total = accuracy(outputs, labels)
+            correct_count += correct
+            total_count += total
 
             self.call("on_step_end", step, {"loss": loss.item()})
 
         return (
             total_loss / len(self.train_loader),
-            total_acc / len(self.train_loader)
+            correct_count / total_count
         )
 
     # ---------- VALIDATION ----------
@@ -195,26 +186,27 @@ class AdvancedTrainer:
         self.model.eval()
 
         total_loss = 0.0
-        total_acc = 0.0
+        correct_count = 0
+        total_count = 0
 
         with torch.no_grad():
             for images, labels in self.val_loader:
                 images = images.to(self.device)
                 labels = labels.to(self.device)
 
-                with torch.cuda.amp.autocast(
-                    enabled=self.use_amp,
-                    dtype=self.autocast_dtype
-                ):
+                with torch.amp.autocast("cuda", enabled=self.use_amp):
                     outputs = self.model(images)
                     loss = self.criterion(outputs, labels)
 
                 total_loss += loss.item()
-                total_acc += accuracy(outputs, labels).item()
+
+                correct, total = accuracy(outputs, labels)
+                correct_count += correct
+                total_count += total
 
         return (
             total_loss / len(self.val_loader),
-            total_acc / len(self.val_loader)
+            correct_count / total_count
         )
 
     # ---------- TRAIN LOOP ----------
