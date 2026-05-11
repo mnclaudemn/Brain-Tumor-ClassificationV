@@ -1,36 +1,50 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+
+
 # ----------------------------
-# 1. ResNet Backbone
+# 1. CNN Backbone (ResNet50)
 # ----------------------------
 class ResNetBackbone(nn.Module):
+    """
+    CNN feature extractor using pretrained ResNet50.
+    Removes classification head and global pooling.
+    """
     def __init__(self):
         super().__init__()
         resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
 
-        # remove avgpool + fc
+        # Remove avgpool and fc layer
         self.backbone = nn.Sequential(*list(resnet.children())[:-2])
 
     def forward(self, x):
-        # (B, 3, H, W) -> (B, 2048, H/32, W/32)
+        # (B, 3, H, W) → (B, 2048, H/32, W/32)
         return self.backbone(x)
 
 
 # ----------------------------
-# 2. Patchify (Flatten spatial dims)
+# 2. Feature Tokenization
 # ----------------------------
-class Patchify(nn.Module):
+class FeatureTokenizer(nn.Module):
+    """
+    Converts CNN feature maps into sequence tokens.
+    """
     def forward(self, x):
         B, C, H, W = x.shape
-        x = x.flatten(2)      # (B, C, N)
-        x = x.transpose(1, 2) # (B, N, C)
+        x = x.flatten(2)       # (B, C, N)
+        x = x.transpose(1, 2)  # (B, N, C)
         return x
+
+
 # ----------------------------
-# 3. Positional Encoding (learnable)
+# 3. Positional Encoding
 # ----------------------------
 class PositionalEncoding(nn.Module):
-    def __init__(self, dim, max_len=10000):
+    """
+    Learnable positional embeddings for feature tokens.
+    """
+    def __init__(self, dim, max_len=2048):
         super().__init__()
         self.pos_embed = nn.Parameter(torch.randn(1, max_len, dim) * 0.02)
 
@@ -39,26 +53,34 @@ class PositionalEncoding(nn.Module):
 
 
 # ----------------------------
-# 4. Full Model
+# 4. Hybrid CNN-Transformer Model
 # ----------------------------
 class ResNetTransformer(nn.Module):
-    def __init__(self, num_classes=10, dim=512, num_layers=4, num_heads=8):
+    """
+    Hybrid architecture:
+    - ResNet50 extracts spatial features
+    - Features are converted into tokens
+    - Transformer learns global dependencies
+    - CLS token used for classification
+    """
+
+    def __init__(self, num_classes=2, dim=512, num_layers=4, num_heads=8):
         super().__init__()
 
         # CNN backbone
         self.backbone = ResNetBackbone()
-        self.patchify = Patchify()
+        self.tokenizer = FeatureTokenizer()
 
-        # projection
+        # Projection from CNN feature space → transformer space
         self.proj = nn.Linear(2048, dim)
 
-        # CLS token
+        # CLS token (global representation)
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
 
-        # positional encoding
+        # Positional encoding
         self.pos_enc = PositionalEncoding(dim)
 
-        # Transformer Encoder (BEST PRACTICE)
+        # Transformer encoder
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=dim,
             nhead=num_heads,
@@ -74,39 +96,39 @@ class ResNetTransformer(nn.Module):
             num_layers=num_layers
         )
 
-        # normalization before head
+        # Classification head
         self.norm = nn.LayerNorm(dim)
-
-        # classifier head
         self.dropout = nn.Dropout(0.1)
         self.classifier = nn.Linear(dim, num_classes)
 
     def forward(self, x):
         B = x.size(0)
 
-        # CNN features
-        x = self.backbone(x)      # (B, 2048, H, W)
-        x = self.patchify(x)      # (B, N, 2048)
+        # 1. CNN feature extraction
+        x = self.backbone(x)          # (B, 2048, H, W)
 
-        # projection
-        x = self.proj(x)          # (B, N, dim)
+        # 2. Tokenization
+        x = self.tokenizer(x)         # (B, N, 2048)
 
-        # CLS token
+        # 3. Projection
+        x = self.proj(x)              # (B, N, dim)
+
+        # 4. CLS token addition
         cls = self.cls_token.expand(B, -1, -1)  # (B, 1, dim)
-        x = torch.cat([cls, x], dim=1)          # (B, 1+N, dim)
+        x = torch.cat([cls, x], dim=1)
 
-        # positional encoding
+        # 5. Positional encoding
         x = self.pos_enc(x)
 
-        # transformer
-        x = self.transformer(x)  # (B, 1+N, dim)
+        # 6. Transformer encoding
+        x = self.transformer(x)
 
-        # CLS token only
-        x = x[:, 0]              # (B, dim)
+        # 7. CLS token extraction
+        x = x[:, 0]
 
-        # head
+        # 8. Classification head
         x = self.norm(x)
         x = self.dropout(x)
-        out = self.classifier(x)
+        x = self.classifier(x)
 
-        return out
+        return x
